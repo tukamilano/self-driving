@@ -4,6 +4,7 @@ using UnityEngine.UI;
 using System.Collections.Generic;
 using System;
 using System.Linq;
+using System.IO;
 
 #if UNITY_EDITOR
 using UnityEditor.SceneManagement;
@@ -65,7 +66,15 @@ public class NEEnvironment : Environment
 
     private List<Obstacle> Obstacles { get; } = new List<Obstacle>();
 
+    [SerializeField] private int maxGenerations = 10;
+    private int MaxGenerations { get { return maxGenerations; } }
+
+    private const string PopulationDumpPath = "Assets/LearningData/NE/Record/PopulationDump.json";
+    private bool populationDumpInitialized;
+    private bool trainingComplete;
+
     void Start() {
+        InitializePopulationDump();
         // Calculate and set input size.
         int sensorCount = 0;
         foreach (bool value in selectedInputs)
@@ -119,6 +128,10 @@ public class NEEnvironment : Environment
     }
 
     void FixedUpdate() {
+        if (trainingComplete) {
+            return;
+        }
+
         foreach(var pair in AgentsSet.Where(p => !p.agent.IsDone)) {
             AgentUpdate(pair.agent, pair.brain);
         }
@@ -166,6 +179,11 @@ public class NEEnvironment : Environment
     }
 
     private void SetNextGeneration() {
+        if (Generation >= MaxGenerations) {
+            CompleteTraining();
+            return;
+        }
+
         AvgReward = SumReward / TotalPopulation;
         GenPopulation();
         SumReward = 0;
@@ -195,6 +213,7 @@ public class NEEnvironment : Environment
         var path = string.Format("Assets/LearningData/NE/{0}.json", EditorSceneManager.GetActiveScene().name);
         bestBrains[0].Save(path);
 #endif
+        DumpPopulationData(bestBrains);
 
         while(children.Count < TotalPopulation) {
             var tournamentMembers = Brains.AsEnumerable().OrderBy(x => Guid.NewGuid()).Take(tournamentSelection).ToList();
@@ -232,9 +251,64 @@ public class NEEnvironment : Environment
             + "\nAverage: " + AvgReward;
     }
 
+    private void CompleteTraining() {
+        trainingComplete = true;
+        Agents.ForEach(a => a.Stop());
+    }
+
     private struct AgentPair
     {
         public NNBrain brain;
         public Agent agent;
+    }
+
+    private void InitializePopulationDump() {
+        if (populationDumpInitialized) return;
+        File.WriteAllText(PopulationDumpPath, string.Empty);
+        populationDumpInitialized = true;
+    }
+
+    private void DumpPopulationData(List<NNBrain> brains) {
+        InitializePopulationDump();
+        var dump = LoadPopulationDump();
+        var generationDump = new GenerationDump {
+            generation = Generation,
+            individuals = brains.Select(b => new IndividualDump {
+                parameters = b.ToDNA().ToList(),
+                fitness = b.Reward
+            }).ToList()
+        };
+        dump.generations.Add(generationDump);
+        var json = JsonUtility.ToJson(dump, true);
+        File.WriteAllText(PopulationDumpPath, json);
+    }
+
+    private PopulationDump LoadPopulationDump() {
+        if (!File.Exists(PopulationDumpPath)) {
+            return new PopulationDump();
+        }
+        var json = File.ReadAllText(PopulationDumpPath);
+        if (string.IsNullOrEmpty(json)) {
+            return new PopulationDump();
+        }
+        var dump = JsonUtility.FromJson<PopulationDump>(json);
+        return dump ?? new PopulationDump();
+    }
+
+    [Serializable]
+    private class PopulationDump {
+        public List<GenerationDump> generations = new List<GenerationDump>();
+    }
+
+    [Serializable]
+    private class GenerationDump {
+        public int generation;
+        public List<IndividualDump> individuals = new List<IndividualDump>();
+    }
+
+    [Serializable]
+    private class IndividualDump {
+        public List<double> parameters;
+        public float fitness;
     }
 }
