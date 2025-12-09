@@ -127,6 +127,35 @@ public class NNBrain : Brain
         return dna.ToArray();
     }
 
+    public int ParameterCount {
+        get {
+            int count = 0;
+            foreach (var b in Biases) {
+                count += b.Row * b.Column;
+            }
+            foreach (var w in Weights) {
+                count += w.Row * w.Column;
+            }
+            return count;
+        }
+    }
+
+    public void FromDNA(double[] dna) {
+        if (dna == null) {
+            throw new ArgumentNullException(nameof(dna));
+        }
+        if (dna.Length != ParameterCount) {
+            throw new ArgumentException($"DNA length mismatch: expected {ParameterCount}, received {dna.Length}.", nameof(dna));
+        }
+
+        var buffer = new float[dna.Length];
+        for (int i = 0; i < dna.Length; i++) {
+            buffer[i] = (float)dna[i];
+        }
+
+        SetDNA(buffer, mutation: false);
+    }
+
     private int SetDNA(Matrix m, float[] dna, int index) {
         for(int r = 0; r < m.Row; r++) {
             for(int c = 0; c < m.Column; c++) {

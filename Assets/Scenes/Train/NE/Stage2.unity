@@ -22988,13 +22988,25 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f2a8569bfce6141f5a1be024efc1a616, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  totalPopulation: 100
-  tournamentSelection: 85
-  eliteSelection: 4
-  inputSize: 46
-  hiddenSize: 8
+  selectedInputs: 01010101010000010000000001000000000000000000000000000000000000000000000000000000010001010001
+  sensorAngleConfig:
+  - 50
+  - 70
+  - 90
+  - 110
+  - 130
+  - 130
+  - 110
+  - 90
+  - 70
+  - 50
+  - 50
+  - 70
+  - 90
+  - 110
+  - 130
+  hiddenSize: 16
   hiddenLayers: 1
-  outputSize: 4
   nAgents: 8
   gObject: {fileID: 2076517850}
   populationText: {fileID: 1334959831}

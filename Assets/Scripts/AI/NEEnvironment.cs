@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System;
 using System.Linq;
 using System.IO;
+using Practice1;
 
 #if UNITY_EDITOR
 using UnityEditor.SceneManagement;
@@ -12,13 +13,10 @@ using UnityEditor.SceneManagement;
 
 public class NEEnvironment : Environment
 {
-    [Header("Settings"), SerializeField] private int totalPopulation = 100;
-    private int TotalPopulation { get { return totalPopulation; } }
-
-    [SerializeField] private int tournamentSelection = 85;
+    private int tournamentSelection = 10;
     private int TournamentSelection { get { return tournamentSelection; } }
 
-    [SerializeField] private int eliteSelection = 4;
+    private int eliteSelection = 4;
     private int EliteSelection { get { return eliteSelection; } }
 
     [SerializeField] public bool[] selectedInputs = new bool[46];
@@ -28,16 +26,21 @@ public class NEEnvironment : Environment
 
     private List<int> SelectedInputsList { get; set; }
 
-    [SerializeField] private int hiddenSize = 8;
+    [SerializeField] private int hiddenSize = 16;
     private int HiddenSize { get { return hiddenSize; } }
 
     [SerializeField] private int hiddenLayers = 1;
     private int HiddenLayers { get { return hiddenLayers; } }
 
-    [SerializeField] private int outputSize = 4;
+    private int outputSize = 3;
     private int OutputSize { get { return outputSize; } }
 
-    [SerializeField] private int nAgents = 4;
+    private double paramCount;
+    private int totalPopulation;
+
+    private int TotalPopulation { get { return totalPopulation; } }
+
+    [SerializeField] private int nAgents = 8;
     private int NAgents { get { return nAgents; } }
 
     [Header("Agent Prefab"), SerializeField] private GameObject gObject = null;
@@ -66,12 +69,18 @@ public class NEEnvironment : Environment
 
     private List<Obstacle> Obstacles { get; } = new List<Obstacle>();
 
-    [SerializeField] private int maxGenerations = 10;
+    [SerializeField] private int maxGenerations = 50;
     private int MaxGenerations { get { return maxGenerations; } }
+
+    private bool use_CMA = true;
+
+    private CMA cmaOptimizer;
+    private bool cmaInitialized;
 
     private const string PopulationDumpPath = "Assets/LearningData/NE/Record/PopulationDump.json";
     private bool populationDumpInitialized;
     private bool trainingComplete;
+    private float savedBestFitness = float.NegativeInfinity;
 
     void Start() {
         InitializePopulationDump();
@@ -91,9 +100,31 @@ public class NEEnvironment : Environment
         }
         SelectedInputsList = selectedInputsList;
 
+        // Derive population parameters now that InputSize is known.
+        paramCount = InputSize * HiddenSize
+                     + HiddenSize * HiddenSize * (HiddenLayers - 1)
+                     + 4 * HiddenSize
+                     + 3;
+        var logArg = Math.Max(paramCount, 1.0);
+        totalPopulation = 4 + (int)(3 * Math.Floor(Math.Log(logArg)));
+        if (totalPopulation <= 0)
+        {
+            totalPopulation = 4; // fallback to minimal population when parameters underflow
+        }
+
         // Initialize brain.
         for(int i = 0; i < TotalPopulation; i++) {
             Brains.Add(new NNBrain(InputSize, HiddenSize, HiddenLayers, OutputSize));
+        }
+
+        if (use_CMA) {
+            try {
+                InitializeCmaPopulation();
+            }
+            catch (Exception ex) {
+                Debug.LogError($"Failed to initialize CMA optimizer: {ex.Message}\n{ex.StackTrace}");
+                use_CMA = false;
+            }
         }
 
         for(int i = 0; i < NAgents; i++) {
@@ -210,18 +241,43 @@ public class NEEnvironment : Environment
         }
 
 #if UNITY_EDITOR
-        var path = string.Format("Assets/LearningData/NE/{0}.json", EditorSceneManager.GetActiveScene().name);
-        bestBrains[0].Save(path);
+        if (bestBrains.Count > 0)
+        {
+            var candidateBest = bestBrains[0];
+            if (candidateBest.Reward > savedBestFitness)
+            {
+                var path = string.Format("Assets/LearningData/NE/{0}.json", EditorSceneManager.GetActiveScene().name);
+                candidateBest.Save(path);
+                savedBestFitness = candidateBest.Reward;
+            }
+        }
 #endif
         DumpPopulationData(bestBrains);
 
-        while(children.Count < TotalPopulation) {
-            var tournamentMembers = Brains.AsEnumerable().OrderBy(x => Guid.NewGuid()).Take(tournamentSelection).ToList();
-            tournamentMembers.Sort(CompareBrains);
-            children.Add(tournamentMembers[0].Mutate(Generation));
-            children.Add(tournamentMembers[1].Mutate(Generation));
+        if(!use_CMA)
+        {
+            while(children.Count < TotalPopulation) {
+                var tournamentMembers = Brains.AsEnumerable().OrderBy(x => Guid.NewGuid()).Take(tournamentSelection).ToList();
+                tournamentMembers.Sort(CompareBrains);
+                children.Add(tournamentMembers[0].Mutate(Generation));
+                children.Add(tournamentMembers[1].Mutate(Generation));
+            }
+            Brains = children;
+        } else
+        {
+            if (!cmaInitialized) {
+                InitializeCmaPopulation();
+            }
+
+            var solutions = new List<(double[] Parameters, double Value)>(Brains.Count);
+            foreach (var brain in Brains) {
+                solutions.Add((brain.ToDNA(), -brain.Reward));
+            }
+
+            cmaOptimizer.Tell(solutions);
+            ApplyCmaSamples();
         }
-        Brains = children;
+
         Generation++;
     }
 
@@ -310,5 +366,28 @@ public class NEEnvironment : Environment
     private class IndividualDump {
         public List<double> parameters;
         public float fitness;
+    }
+
+    private void InitializeCmaPopulation() {
+        if (Brains == null || Brains.Count == 0) {
+            throw new InvalidOperationException("Brains must be initialized before CMA initialization.");
+        }
+
+        var sampleDna = Brains[0].ToDNA();
+        cmaOptimizer = new CMA(new double[sampleDna.Length], 0.5, populationSize: TotalPopulation);
+        ApplyCmaSamples();
+        cmaInitialized = true;
+    }
+
+    private void ApplyCmaSamples() {
+        if (cmaOptimizer == null) {
+            throw new InvalidOperationException("CMA optimizer is not initialized.");
+        }
+
+        for (int i = 0; i < Brains.Count; i++) {
+            var candidate = cmaOptimizer.Ask();
+            Brains[i].FromDNA(candidate);
+            Brains[i].Reward = 0f;
+        }
     }
 }
