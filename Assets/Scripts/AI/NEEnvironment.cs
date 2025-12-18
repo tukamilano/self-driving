@@ -1,6 +1,7 @@
 // SerialID: [77a855b2-f53d-4b80-9c94-c40562952b74]
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.SceneManagement;
 using System.Collections.Generic;
 using System;
 using System.Linq;
@@ -32,7 +33,7 @@ public class NEEnvironment : Environment
     [SerializeField] private int hiddenLayers = 1;
     private int HiddenLayers { get { return hiddenLayers; } }
 
-    private int outputSize = 3;
+    private int outputSize = 2;
     private int OutputSize { get { return outputSize; } }
 
     private double paramCount;
@@ -63,6 +64,9 @@ public class NEEnvironment : Environment
     private int Generation { get; set; }
 
     private float BestRecord { get; set; }
+    private float BestOverallReward { get; set; } = float.NegativeInfinity;
+    private NNBrain BestOverallBrain { get; set; }
+    private NNBrain BestLastGenerationBrain { get; set; }
 
     private List<AgentPair> AgentsSet { get; } = new List<AgentPair>();
     private Queue<NNBrain> CurrentBrains { get; set; }
@@ -74,13 +78,15 @@ public class NEEnvironment : Environment
 
     private bool use_CMA = true;
 
+    [SerializeField] private string cmaSeedFileName = "";
+
     private CMA cmaOptimizer;
     private bool cmaInitialized;
 
     private const string PopulationDumpPath = "Assets/LearningData/NE/Record/PopulationDump.json";
+    private const string CmaSeedDirectory = "Assets/LearningData/NE";
     private bool populationDumpInitialized;
     private bool trainingComplete;
-    private float savedBestFitness = float.NegativeInfinity;
 
     void Start() {
         InitializePopulationDump();
@@ -175,6 +181,11 @@ public class NEEnvironment : Environment
                 BestRecord = Mathf.Max(r, BestRecord);
                 GenBestRecord = Mathf.Max(r, GenBestRecord);
                 p.brain.Reward = r;
+                if (r > BestOverallReward)
+                {
+                    BestOverallReward = r;
+                    BestOverallBrain = new NNBrain(p.brain);
+                }
                 SumReward += r;
             }
             return p.agent.IsDone;
@@ -240,18 +251,6 @@ public class NEEnvironment : Environment
             children.AddRange(bestBrains.Take(EliteSelection));
         }
 
-#if UNITY_EDITOR
-        if (bestBrains.Count > 0)
-        {
-            var candidateBest = bestBrains[0];
-            if (candidateBest.Reward > savedBestFitness)
-            {
-                var path = string.Format("Assets/LearningData/NE/{0}.json", EditorSceneManager.GetActiveScene().name);
-                candidateBest.Save(path);
-                savedBestFitness = candidateBest.Reward;
-            }
-        }
-#endif
         DumpPopulationData(bestBrains);
 
         if(!use_CMA)
@@ -277,6 +276,11 @@ public class NEEnvironment : Environment
             cmaOptimizer.Tell(solutions);
             ApplyCmaSamples();
         }
+
+        var lastGenBest = bestBrains
+            .OrderByDescending(b => b.Reward)
+            .FirstOrDefault();
+        BestLastGenerationBrain = lastGenBest != null ? new NNBrain(lastGenBest) : null;
 
         Generation++;
     }
@@ -310,6 +314,9 @@ public class NEEnvironment : Environment
     private void CompleteTraining() {
         trainingComplete = true;
         Agents.ForEach(a => a.Stop());
+#if UNITY_EDITOR
+        SaveFinalBestBrain();
+#endif
     }
 
     private struct AgentPair
@@ -374,9 +381,46 @@ public class NEEnvironment : Environment
         }
 
         var sampleDna = Brains[0].ToDNA();
-        cmaOptimizer = new CMA(new double[sampleDna.Length], 0.5, populationSize: TotalPopulation);
+        var initialMean = new double[sampleDna.Length];
+
+        var seedPath = ResolveCmaSeedPath();
+        try
+        {
+            if (File.Exists(seedPath))
+            {
+                var json = File.ReadAllText(seedPath);
+                if (!string.IsNullOrEmpty(json))
+                {
+                    var seedBrain = JsonUtility.FromJson<NNBrain>(json);
+                    if (seedBrain != null && seedBrain.ParameterCount == sampleDna.Length)
+                    {
+                        initialMean = seedBrain.ToDNA();
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"Seed brain parameter mismatch for {seedPath}; using default CMA mean.");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"Failed to load CMA seed from {seedPath}: {ex.Message}");
+            initialMean = new double[sampleDna.Length];
+        }
+
+        var sigma = string.IsNullOrEmpty(cmaSeedFileName) ? 0.5 : 0.1;
+        cmaOptimizer = new CMA(initialMean, sigma, populationSize: TotalPopulation);
         ApplyCmaSamples();
         cmaInitialized = true;
+    }
+
+    private string ResolveCmaSeedPath()
+    {
+        var fileStem = string.IsNullOrEmpty(cmaSeedFileName)
+            ? SceneManager.GetActiveScene().name
+            : cmaSeedFileName;
+        return Path.Combine(CmaSeedDirectory, fileStem + ".json");
     }
 
     private void ApplyCmaSamples() {
@@ -390,4 +434,31 @@ public class NEEnvironment : Environment
             Brains[i].Reward = 0f;
         }
     }
+#if UNITY_EDITOR
+    private void SaveFinalBestBrain()
+    {
+        if (BestOverallBrain == null && BestLastGenerationBrain == null)
+        {
+            return;
+        }
+
+        var sceneName = EditorSceneManager.GetActiveScene().name;
+        if (string.IsNullOrEmpty(sceneName))
+        {
+            return;
+        }
+
+        if (BestOverallBrain != null)
+        {
+            var overallPath = string.Format("Assets/LearningData/NE/{0}.json", sceneName);
+            BestOverallBrain.Save(overallPath);
+        }
+
+        if (BestLastGenerationBrain != null)
+        {
+            var lastGenPath = string.Format("Assets/LearningData/NE/{0}_LastGen.json", sceneName);
+            BestLastGenerationBrain.Save(lastGenPath);
+        }
+    }
+#endif
 }

@@ -58,7 +58,7 @@ public class Obstacle : MonoBehaviour
         if(Left == Vector3.zero || Right == Vector3.zero) {
             return;
         }
-        transform.position = Vector3.Lerp(Left, Right, UnityEngine.Random.Range(0.2f, 0.8f));
+        transform.position = Vector3.Lerp(Left, Right, UnityEngine.Random.Range(0.01f, 0.99f));
 
         RaycastHit hit;
         if(Physics.Raycast(transform.position, Vector3.down, out hit, float.MaxValue, LayerMask.GetMask(LayerRoad))) {
@@ -88,7 +88,7 @@ public class Obstacle : MonoBehaviour
         }
     }
     public void ResetRandomPosition() {
-        transform.position = Vector3.Lerp(Left, Right, UnityEngine.Random.Range(0.2f, 0.8f));
+        transform.position = Vector3.Lerp(Left, Right, UnityEngine.Random.Range(0.01f, 0.99f));
         transform.rotation = StartRotation;
         ApplyScale();
         var rg = GetComponentInChildren<Rigidbody>();

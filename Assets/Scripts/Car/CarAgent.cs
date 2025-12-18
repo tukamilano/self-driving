@@ -8,14 +8,21 @@ public class CarAgent : Agent
     [SerializeField] private int currentStep = 0;
     private int CurrentStep { get { return currentStep; } set { currentStep = value; } }
 
-    [SerializeField] private int currentStepMax = 5000;
+    private const int DefaultCurrentStepMax = 20000;
+    private int currentStepMax = DefaultCurrentStepMax;
     private int CurrentStepMax => currentStepMax;
 
     [SerializeField] private int localStep = 0;
     private int LocalStep { get { return localStep; } set { localStep = value; } }
 
-    [SerializeField] private int localStepMax = 200;
+    private const int DefaultLocalStepMax = 1000;
+    private int localStepMax = DefaultLocalStepMax;
     private int LocalStepMax => localStepMax;
+
+    private const float DefaultPenalty = 1000f;
+
+    [SerializeField] private float penalty = DefaultPenalty;
+    private float Penalty => penalty > 0f ? penalty : DefaultPenalty;
 
     [SerializeField] private bool allowPlusReward = true;
     private bool AllowPlusReward => allowPlusReward;
@@ -43,6 +50,12 @@ public class CarAgent : Agent
         Controller = GetComponent<CarController>();
         Sensors = GetComponentsInChildren<Sensor>();
         isBattle=false;
+    }
+
+    private void OnValidate() {
+        if (penalty <= 0f) {
+            penalty = DefaultPenalty;
+        }
     }
 
     public void Start() {
@@ -239,15 +252,21 @@ public class CarAgent : Agent
 
         if(IsLearning) {
             if(CurrentStep > CurrentStepMax) {
-                DoneWithReward(TotalDistance);
+                CompleteEpisode(TotalDistance);
                 return;
             }
 
             if(LocalStep > LocalStepMax) {
-                DoneWithReward(-1.0f / TotalDistance);
+                CompleteEpisode(TotalDistance);
                 return;
             }
-        }
+        } else if(isBattle) {
+              // バトル中はLocalStepMax以内に次のWaypointに到達できなければGame Over
+              if(LocalStep > LocalStepMax) {
+                  agentExecutor.GameOver(agentIndex);
+                  return;
+                }
+            }
 
         var steering = Mathf.Clamp((float)vectorAction[0], -1.0f, 1.0f);
         float gasInput = 0.0f;
@@ -284,7 +303,7 @@ public class CarAgent : Agent
             if (BackUpOnCollision) {
                 StartBackingUp();
             } else {
-                DoneWithReward(-1.0f / TotalDistance);
+                CompleteEpisode(TotalDistance);
             }
         }
     }
@@ -300,7 +319,7 @@ public class CarAgent : Agent
             bool reverseRunFromStartPosition = waypoint.Index>WaypointIndex+1;
             bool reverseRunFromOtherPosition = waypoint.Index<=WaypointIndex;
             if( reverseRunFromOtherPosition|| reverseRunFromStartPosition){
-                DoneWithReward(-1.0f / TotalDistance);
+                CompleteEpisode(TotalDistance);
                 return;
             }
         }
@@ -324,12 +343,17 @@ public class CarAgent : Agent
         Controller.Stop();
     }
 
-    private void DoneWithReward(float reward) {
-        if(reward > 0 && !AllowPlusReward) {
-            reward = 0;
+    private void CompleteEpisode(float baseReward, bool applyPenalty = true) {
+        var finalReward = baseReward;
+        if(applyPenalty) {
+            finalReward -= Penalty;
         }
 
-        SetReward(reward);
+        if(finalReward > 0 && !AllowPlusReward) {
+            finalReward = 0;
+        }
+
+        SetReward(finalReward);
         Done();
     }
 }

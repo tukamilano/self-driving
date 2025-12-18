@@ -38,7 +38,7 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 0}
-  m_IndirectSpecularColor: {r: 0.4465788, g: 0.4964137, b: 0.57481897, a: 1}
+  m_IndirectSpecularColor: {r: 0.4465785, g: 0.49641365, b: 0.5748188, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -12365,9 +12365,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   agents:
   - agent: {fileID: 132584626}
-    brain: {fileID: 11400000, guid: 90060ff82400dfd4dbf8f1d72f931173, type: 2}
+    brain: {fileID: 11400000, guid: 9ac52dbc0223c46a7b7fb59cd9d5f029, type: 2}
   - agent: {fileID: 686467747}
-    brain: {fileID: 11400000, guid: b6eff6e241d0d7c41a3b16f788bf70f4, type: 2}
+    brain: {fileID: 11400000, guid: 9ac52dbc0223c46a7b7fb59cd9d5f029, type: 2}
   populationText: {fileID: 1170059951}
   name1Text: {fileID: 1722466227}
   name2Text: {fileID: 1985911685}

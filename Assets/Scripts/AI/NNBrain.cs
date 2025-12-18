@@ -37,7 +37,7 @@ public class NNBrain : Brain
             throw new ArgumentException($"Input size mismatch: observation.Count ({observation.Count}) does not match the expected InputSize ({InputSize}). Please check if selected sensors match for the trained data and your custom brain.");
         }
         var action = Predict(observation.ToArray());
-        return action;
+        return MapToControlVector(action);
     }
 
     public NNBrain(int inputSize, int hiddenSize, int hiddenLayers, int outputSize) {
@@ -81,15 +81,9 @@ public class NNBrain : Brain
             }
             output = output.Mul(Weights[i]);
             var b = Biases[i];
-            if(i != HiddenLayers) {
-                for(int c = 0; c < b.Column; c++) {
-                    output[0, c] = Tanh(output[0, c] + b[0, c]);
-                }
-            }
-            else {
-                for(int c = 0; c < b.Column; c++) {
-                    output[0, c] = output[0, c] + b[0, c];
-                }
+            for(int c = 0; c < b.Column; c++) {
+                var preActivation = output[0, c] + b[0, c];
+                output[0, c] = Tanh(preActivation);
             }
         }
         for(int c = 0; c < OutputSize; c++) {
@@ -104,6 +98,44 @@ public class NNBrain : Brain
 
     private double Tanh(double x) {
         return Math.Tanh(x);
+    }
+
+    private double ReLU(double x) {
+        return Math.Max(0.0, x);
+    }
+
+    private double[] MapToControlVector(double[] networkOutput) {
+        if (networkOutput == null || networkOutput.Length != OutputSize) {
+            throw new ArgumentException($"Network output must have length {OutputSize}.", nameof(networkOutput));
+        }
+
+        var controls = new double[3];
+        var steer = Tanh(networkOutput[0]);
+        var throttleBrake = Tanh(networkOutput.Length > 1 ? networkOutput[1] : 0.0);
+
+        double throttle = 0.0;
+        double brake = 0.0;
+
+        if (throttleBrake >= 0.0) {
+            throttle = throttleBrake;
+        } else {
+            brake = -throttleBrake;
+        }
+
+        controls[0] = steer;
+        controls[1] = Clamp01(throttle);
+        controls[2] = Clamp01(brake);
+        return controls;
+    }
+
+    private double Clamp01(double value) {
+        if (value < 0.0) {
+            return 0.0;
+        }
+        if (value > 1.0) {
+            return 1.0;
+        }
+        return value;
     }
 
     private void SetDNA(float[] dna, bool mutation = true) {

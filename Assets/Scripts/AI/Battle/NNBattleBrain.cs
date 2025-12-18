@@ -11,6 +11,7 @@ public class NNBattleBrain : BattleBrain
     [HideInInspector] public NNBrain brain;
 
     public override void Initialize() {
+        Debug.Log($"[NNBattleBrain] brainData: name={brainData?.name ?? "<null>"}, length={brainData?.text?.Length.ToString() ?? "<null>"}\n{brainData?.text ?? "<null>"}");
         base.Initialize();
         try
         {
